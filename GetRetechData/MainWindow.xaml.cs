@@ -2,6 +2,7 @@
 using Oracle.ManagedDataAccess.Client;
 using System.Data;
 using System.IO;
+using System.IO.Compression;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
@@ -38,6 +39,7 @@ namespace GetRetechData
 
         private void BtnConnect_Click(object sender, RoutedEventArgs e)
         {
+            Mouse.OverrideCursor = Cursors.Wait;
             using (OracleConnection conn = new OracleConnection(_connString))
             {
                 try
@@ -50,6 +52,10 @@ namespace GetRetechData
                 catch (Exception ex)
                 {
                     TxtStatus.Text = $"Status Gagal: {ex.Message}";
+                }
+                finally
+                {
+                    Mouse.OverrideCursor = null;
                 }
             }
         }
@@ -66,6 +72,7 @@ namespace GetRetechData
 
         private void LoadPage()
         {
+            Mouse.OverrideCursor = Cursors.Wait;
             int offset = (_currentPage - 1) * _pageSize;
             int endRow = offset + _pageSize;
 
@@ -98,7 +105,28 @@ namespace GetRetechData
                 {
                     TxtStatus.Text = $"Gagal: {ex.Message}";
                 }
+                finally
+                {
+                    Mouse.OverrideCursor = null;
+                }
             }
+        }
+
+        private void DisabledAll()
+        {
+            BtnLoadData.IsEnabled = false;
+            BtnConnect.IsEnabled = false;
+            DataGridResult.IsEnabled= false;
+            BtnNext.IsEnabled = false;
+            BtnPrev.IsEnabled = false;
+        }
+        private void EnabledAll()
+        {
+            BtnLoadData.IsEnabled = true;
+            BtnConnect.IsEnabled = true;
+            DataGridResult.IsEnabled= true;
+            BtnNext.IsEnabled = true;
+            BtnPrev.IsEnabled = true;
         }
 
         private void BtnLoadData_Click(object sender, RoutedEventArgs e)
@@ -153,8 +181,8 @@ namespace GetRetechData
         {
             var dialog = new SaveFileDialog
             {
-                Filter = "CSV Files|*.csv",
-                FileName = "item_loc_soh.csv"
+                Filter = "ZIP Files|*.zip",
+                FileName = "item_loc_soh.zip"
             };
 
             if (dialog.ShowDialog() != true)
@@ -167,6 +195,7 @@ namespace GetRetechData
 
             try
             {
+                DisabledAll();
                 TxtStatus.Text = "Menghitung total baris...";
 
                 int totalRows;
@@ -232,7 +261,43 @@ namespace GetRetechData
                     }
                 });
 
-                TxtStatus.Text = $"Ekspor selesai: {totalRows} baris -> {filePath}";
+                TxtStatus.Text = "Mengompres file...";
+                ProgressBarExport.IsIndeterminate = true;
+
+                string zipPath = System.IO.Path.ChangeExtension(filePath, ".zip");
+                string entryName = System.IO.Path.GetFileName(filePath);
+                if (!entryName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+                    entryName = System.IO.Path.GetFileNameWithoutExtension(entryName) + ".csv";
+                byte[] csvBytes = await Task.Run(() =>
+                {
+                    for (int retry = 0; ; retry++)
+                    {
+                        try
+                        {
+                            return File.ReadAllBytes(filePath);
+                        }
+                        catch (IOException) when (retry < 5)
+                        {
+                            Thread.Sleep(300);
+                        }
+                    }
+                });
+                await Task.Run(() =>
+                {
+                    using (var fs = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                    using (var archive = new ZipArchive(fs, ZipArchiveMode.Create))
+                    {
+                        var entry = archive.CreateEntry(entryName, CompressionLevel.Optimal);
+                        using (var entryStream = entry.Open())
+                        using (var memStream = new MemoryStream(csvBytes))
+                        {
+                            memStream.CopyTo(entryStream);
+                        }
+                    }
+                });
+
+                TxtStatus.Text = $"Ekspor selesai: {totalRows} baris -> {zipPath}";
+                EnabledAll();
             }
             catch (Exception ex)
             {

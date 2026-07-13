@@ -5,7 +5,9 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:GetRetechData"
         mc:Ignorable="d"
-        Title="MainWindow" Height="450" Width="800">
+        Title="GetRetechData" Height="450" Width="800"
+        WindowStartupLocation="CenterScreen"
+        Icon="app_icon.png">
     <Window.Resources>
         <Style TargetType="Button">
             <Setter Property="Cursor" Value="Hand"/>
@@ -29,7 +31,7 @@
                     Click="BtnLoadData_Click"
                     Width="100" Height="35" Margin="0,0,10,0" FontSize="13"/>
             <Button x:Name="BtnExport"
-                    Content="Export CSV"
+                    Content="Export to ZIP"
                     IsEnabled="False"
                     Click="BtnExport_Click"
                     Width="100" Height="35" Margin="0,0,10,0" FontSize="13"/>
@@ -53,7 +55,7 @@
                   Margin="10,10,10,50"
                   AutoGenerateColumns="True"
                   IsReadOnly="True"
-                  AlternatingRowBackground="LightGray"/>
+                  AlternatingRowBackground="LightGreen"/>
 
         <StackPanel Grid.Row="2"
                     Orientation="Horizontal"
