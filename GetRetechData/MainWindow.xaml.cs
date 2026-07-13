@@ -103,7 +103,7 @@ namespace GetRetechData
 
         private void BtnLoadData_Click(object sender, RoutedEventArgs e)
         {
-            Cursor = Cursors.Wait;
+            Mouse.OverrideCursor = Cursors.Wait;
             using (OracleConnection conn = new OracleConnection(_connString))
             {
                 try
@@ -126,7 +126,7 @@ namespace GetRetechData
                 }
                 finally
                 {
-                    Cursor = Cursors.Arrow;
+                    Mouse.OverrideCursor = null;
                 }
             }
         }
