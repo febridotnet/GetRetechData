@@ -119,7 +119,7 @@ namespace GetRetechData
         {
             BtnLoadData.IsEnabled = false;
             BtnConnect.IsEnabled = false;
-            DataGridResult.IsEnabled= false;
+            DataGridResult.IsEnabled = false;
             BtnNext.IsEnabled = false;
             BtnPrev.IsEnabled = false;
         }
@@ -127,7 +127,7 @@ namespace GetRetechData
         {
             BtnLoadData.IsEnabled = true;
             BtnConnect.IsEnabled = true;
-            DataGridResult.IsEnabled= true;
+            DataGridResult.IsEnabled = true;
             BtnNext.IsEnabled = true;
             BtnPrev.IsEnabled = true;
         }
@@ -394,23 +394,11 @@ namespace GetRetechData
                             using (var cmd = conn.CreateCommand())
                             {
                                 cmd.Transaction = tx;
-
-                                var updateCols = headers
-                                    .Where(h => !string.Equals(h, "loc", StringComparison.OrdinalIgnoreCase)
-                                             && !string.Equals(h, "item", StringComparison.OrdinalIgnoreCase))
-                                    .ToArray();
-
-                                string updateSet = string.Join(", ", updateCols.Select(c => $"target.[{c}] = source.[{c}]"));
-                                string insertCols = string.Join(", ", headers.Select(c => $"[{c}]"));
-                                string sourceCols = string.Join(", ", headers.Select(c => $"source.[{c}]"));
-                                string sourceSelect = string.Join(", ", headers.Select((c, i) => $"@p{i} AS [{c}]"));
-
                                 cmd.CommandText = $@"
-                                    MERGE item_loc_soh AS target
-                                    USING (SELECT {sourceSelect}) AS source
-                                    ON target.[loc] = source.[loc] AND target.[item] = source.[item]
-                                    WHEN MATCHED THEN UPDATE SET {updateSet}
-                                    WHEN NOT MATCHED THEN INSERT ({insertCols}) VALUES ({sourceCols});";
+                                    INSERT INTO item_loc_soh
+                                    ({string.Join(",", headers)})
+                                    VALUES
+                                    ({string.Join(",", headers.Select((_, i) => $"@p{i}"))})";
 
                                 for (int i = 0; i < headers.Length; i++)
                                 {
