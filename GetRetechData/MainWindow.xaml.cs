@@ -122,17 +122,21 @@ namespace GetRetechData
         {
             BtnLoadData.IsEnabled = false;
             BtnConnect.IsEnabled = false;
+            BtnImport.IsEnabled = false;
+            BtnExport.IsEnabled = false;
             DataGridResult.IsEnabled = false;
-            BtnNext.IsEnabled = false;
-            BtnPrev.IsEnabled = false;
+            BtnPrev.IsEnabled = _currentPage > 1;
+            BtnNext.IsEnabled = _currentPage < _totalPages;
         }
         private void EnabledAll()
         {
             BtnLoadData.IsEnabled = true;
             BtnConnect.IsEnabled = true;
+            BtnImport.IsEnabled = true;
+            BtnExport.IsEnabled = true;
             DataGridResult.IsEnabled = true;
-            BtnNext.IsEnabled = true;
-            BtnPrev.IsEnabled = true;
+            BtnPrev.IsEnabled = _currentPage > 1;
+            BtnNext.IsEnabled = _currentPage < _totalPages;
         }
 
         private void BtnLoadData_Click(object sender, RoutedEventArgs e)
