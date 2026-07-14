@@ -1,4 +1,5 @@
-﻿using Microsoft.Win32;
+﻿using Microsoft.Data.SqlClient;
+using Microsoft.Win32;
 using Oracle.ManagedDataAccess.Client;
 using System.Data;
 using System.IO;
@@ -23,6 +24,7 @@ namespace GetRetechData
         private int _totalPages = 0;
         private int _totalRows = 0;
         private string _connString;
+        private readonly string _importConnString;
 
         public MainWindow()
         {
@@ -35,6 +37,7 @@ namespace GetRetechData
             string pass = "rmsidbit";
 
             _connString = $"User Id={user};Password={pass};Data Source=(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST={host})(PORT={port}))(CONNECT_DATA=(SERVER=DEDICATED)(SERVICE_NAME={sid})));";
+            _importConnString = "data source=10.110.32.58;initial catalog=RMS_DataInit;MultipleActiveResultSets=True;integrated security=false;user id=app.admin;password=@dm1n_app;Connection Timeout=0;Max Pool Size=2000;TrustServerCertificate=True";
         }
 
         private void BtnConnect_Click(object sender, RoutedEventArgs e)
@@ -307,6 +310,143 @@ namespace GetRetechData
             {
                 ProgressBarExport.Visibility = Visibility.Collapsed;
                 BtnExport.IsEnabled = true;
+            }
+        }
+        private async void BtnImport_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new OpenFileDialog
+            {
+                Filter = "CSV/ZIP Files|*.csv;*.zip",
+                FileName = "item_loc_soh.csv"
+            };
+
+            if (dialog.ShowDialog() != true)
+                return;
+
+            string sourcePath = dialog.FileName;
+            ProgressBarExport.Visibility = Visibility.Visible;
+            ProgressBarExport.IsIndeterminate = true;
+            BtnImport.IsEnabled = false;
+
+            string csvPath = sourcePath;
+            bool isTempFile = false;
+
+            try
+            {
+                if (sourcePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                {
+                    TxtStatus.Text = "Membaca file ZIP...";
+                    string tempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid().ToString());
+                    Directory.CreateDirectory(tempDir);
+                    isTempFile = true;
+
+                    using (var archive = ZipFile.OpenRead(sourcePath))
+                    {
+                        var entry = archive.Entries.FirstOrDefault(e2 => e2.Name.EndsWith(".csv", StringComparison.OrdinalIgnoreCase));
+                        if (entry == null)
+                        {
+                            TxtStatus.Text = "Tidak ditemukan file CSV dalam ZIP.";
+                            return;
+                        }
+                        csvPath = System.IO.Path.Combine(tempDir, entry.Name);
+                        entry.ExtractToFile(csvPath, overwrite: true);
+                    }
+                }
+
+                TxtStatus.Text = "Membaca file CSV...";
+                string[] lines = File.ReadAllLines(csvPath, Encoding.UTF8);
+                if (lines.Length < 2)
+                {
+                    TxtStatus.Text = "File CSV kosong atau hanya header.";
+                    return;
+                }
+
+                string headerLine = lines[0];
+                string[] headers = headerLine.Split('|');
+                int dataLines = lines.Length - 1;
+
+                ProgressBarExport.Maximum = dataLines;
+                ProgressBarExport.Value = 0;
+                ProgressBarExport.IsIndeterminate = false;
+
+                TxtStatus.Text = $"Mengimpor {dataLines} baris...";
+
+                await Task.Run(() =>
+                {
+                    using (var conn = new SqlConnection(_importConnString))
+                    {
+                        conn.Open();
+
+                        using (var createCmd = conn.CreateCommand())
+                        {
+                            createCmd.CommandText = $@"
+                                IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'item_loc_soh')
+                                BEGIN
+                                    CREATE TABLE item_loc_soh (
+                                        {string.Join(", ", headers.Select(h => $"[{h}] NVARCHAR(MAX)"))}
+                                    )
+                                END";
+                            createCmd.ExecuteNonQuery();
+                        }
+
+                        using (var tx = conn.BeginTransaction())
+                        {
+                            using (var cmd = conn.CreateCommand())
+                            {
+                                cmd.Transaction = tx;
+                                cmd.CommandText = $@"
+                                    INSERT INTO item_loc_soh
+                                    ({string.Join(",", headers)})
+                                    VALUES
+                                    ({string.Join(",", headers.Select((_, i) => $"@p{i}"))})";
+
+                                for (int i = 0; i < headers.Length; i++)
+                                {
+                                    cmd.Parameters.Add($"@p{i}", SqlDbType.NVarChar, 4000);
+                                }
+
+                                for (int row = 1; row < lines.Length; row++)
+                                {
+                                    string[] cols = lines[row].Split('|');
+
+                                    for (int i = 0; i < headers.Length; i++)
+                                    {
+                                        if (i < cols.Length && !string.IsNullOrEmpty(cols[i]))
+                                            cmd.Parameters[$"@p{i}"].Value = cols[i];
+                                        else
+                                            cmd.Parameters[$"@p{i}"].Value = DBNull.Value;
+                                    }
+
+                                    cmd.ExecuteNonQuery();
+
+                                    if (row % 500 == 0)
+                                    {
+                                        int current = row;
+                                        Dispatcher.Invoke(() => ProgressBarExport.Value = current);
+                                    }
+                                }
+                            }
+
+                            tx.Commit();
+                        }
+                    }
+                });
+
+                TxtStatus.Text = $"Impor selesai: {dataLines} baris diimpor.";
+            }
+            catch (Exception ex)
+            {
+                TxtStatus.Text = $"Gagal impor: {ex.Message}";
+            }
+            finally
+            {
+                if (isTempFile)
+                {
+                    try { Directory.Delete(System.IO.Path.GetDirectoryName(csvPath), recursive: true); }
+                    catch { }
+                }
+                ProgressBarExport.Visibility = Visibility.Collapsed;
+                BtnImport.IsEnabled = true;
             }
         }
     }

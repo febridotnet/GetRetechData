@@ -36,6 +36,11 @@
                         IsEnabled="False"
                         Click="BtnExport_Click"
                         Width="100" Height="35" Margin="0,0,10,0" FontSize="13"/>
+                <Button x:Name="BtnImport"
+                        Content="Import to DB"
+                        IsEnabled="True"
+                        Click="BtnImport_Click"
+                        Width="100" Height="35" Margin="0,0,10,0" FontSize="13"/>
             </StackPanel>
             <TextBlock x:Name="TxtStatus"
                        Text="Status: Belum Terhubung"
