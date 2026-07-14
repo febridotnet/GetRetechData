@@ -25,10 +25,12 @@ namespace GetRetechData
         private int _totalRows = 0;
         private string _connString;
         private readonly string _importConnString;
+        private bool _isImporting;
 
         public MainWindow()
         {
             InitializeComponent();
+            Closing += (s, e) => { if (_isImporting) e.Cancel = true; };
 
             string host = "10.32.159.101";
             string port = "1523";
@@ -327,6 +329,7 @@ namespace GetRetechData
             ProgressBarExport.Visibility = Visibility.Visible;
             ProgressBarExport.IsIndeterminate = true;
             BtnImport.IsEnabled = false;
+            DisabledAll();
 
             string csvPath = sourcePath;
             bool isTempFile = false;
@@ -365,11 +368,27 @@ namespace GetRetechData
                 string[] headers = headerLine.Split('|');
                 int dataLines = lines.Length - 1;
 
+                TxtStatus.Text = "Menyiapkan data...";
+
+                DataTable dt = new DataTable();
+                foreach (var header in headers)
+                    dt.Columns.Add(header, typeof(string));
+
+                for (int row = 1; row < lines.Length; row++)
+                {
+                    string[] cols = lines[row].Split('|');
+                    var dr = dt.NewRow();
+                    for (int i = 0; i < headers.Length; i++)
+                        dr[i] = (i < cols.Length && !string.IsNullOrEmpty(cols[i])) ? cols[i] : DBNull.Value;
+                    dt.Rows.Add(dr);
+                }
+
                 ProgressBarExport.Maximum = dataLines;
                 ProgressBarExport.Value = 0;
                 ProgressBarExport.IsIndeterminate = false;
 
-                TxtStatus.Text = $"Mengimpor {dataLines} baris...";
+                _isImporting = true;
+                TxtStatus.Text = $"Mengimpor {dataLines} baris, mohon tunggu sedang diproses...";
 
                 await Task.Run(() =>
                 {
@@ -377,57 +396,74 @@ namespace GetRetechData
                     {
                         conn.Open();
 
-                        using (var createCmd = conn.CreateCommand())
+                        using (var cmd = conn.CreateCommand())
                         {
-                            createCmd.CommandText = $@"
+                            cmd.CommandText = $@"
+                                CREATE TABLE #temp (
+                                    {string.Join(", ", headers.Select(h => $"[{h}] NVARCHAR(4000)"))}
+                                )";
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        using (var bulk = new SqlBulkCopy(conn))
+                        {
+                            bulk.DestinationTableName = "#temp";
+                            bulk.BatchSize = 1000;
+                            bulk.NotifyAfter = 1000;
+                            bulk.SqlRowsCopied += (s, args) =>
+                                Dispatcher.Invoke(() => ProgressBarExport.Value = (int)args.RowsCopied);
+                            bulk.WriteToServer(dt);
+                        }
+
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.CommandText = $@"
+                                CREATE INDEX IX_temp_loc_item ON #temp ([loc], [item])";
+                            cmd.ExecuteNonQuery();
+                        }
+
+                        using (var cmd = conn.CreateCommand())
+                        {
+                            cmd.CommandText = $@"
                                 IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'item_loc_soh')
                                 BEGIN
                                     CREATE TABLE item_loc_soh (
                                         {string.Join(", ", headers.Select(h => $"[{h}] NVARCHAR(MAX)"))}
                                     )
                                 END";
-                            createCmd.ExecuteNonQuery();
+                            cmd.ExecuteNonQuery();
                         }
 
-                        using (var tx = conn.BeginTransaction())
+                        var updateCols = headers
+                            .Where(h => !string.Equals(h, "loc", StringComparison.OrdinalIgnoreCase)
+                                     && !string.Equals(h, "item", StringComparison.OrdinalIgnoreCase))
+                            .ToArray();
+
+                        string updateSet = string.Join(", ", updateCols.Select(c => $"target.[{c}] = source.[{c}]"));
+                        string insertCols = string.Join(", ", headers.Select(c => $"[{c}]"));
+                        string sourceCols = string.Join(", ", headers.Select(c => $"source.[{c}]"));
+
+                        try
                         {
                             using (var cmd = conn.CreateCommand())
                             {
-                                cmd.Transaction = tx;
+                                cmd.CommandTimeout = 0;
                                 cmd.CommandText = $@"
-                                    INSERT INTO item_loc_soh
-                                    ({string.Join(",", headers)})
-                                    VALUES
-                                    ({string.Join(",", headers.Select((_, i) => $"@p{i}"))})";
-
-                                for (int i = 0; i < headers.Length; i++)
-                                {
-                                    cmd.Parameters.Add($"@p{i}", SqlDbType.NVarChar, 4000);
-                                }
-
-                                for (int row = 1; row < lines.Length; row++)
-                                {
-                                    string[] cols = lines[row].Split('|');
-
-                                    for (int i = 0; i < headers.Length; i++)
-                                    {
-                                        if (i < cols.Length && !string.IsNullOrEmpty(cols[i]))
-                                            cmd.Parameters[$"@p{i}"].Value = cols[i];
-                                        else
-                                            cmd.Parameters[$"@p{i}"].Value = DBNull.Value;
-                                    }
-
-                                    cmd.ExecuteNonQuery();
-
-                                    if (row % 500 == 0)
-                                    {
-                                        int current = row;
-                                        Dispatcher.Invoke(() => ProgressBarExport.Value = current);
-                                    }
-                                }
+                                    MERGE item_loc_soh AS target
+                                    USING #temp AS source
+                                    ON target.[loc] = source.[loc] AND target.[item] = source.[item]
+                                    WHEN MATCHED THEN UPDATE SET {updateSet}
+                                    WHEN NOT MATCHED THEN INSERT ({insertCols}) VALUES ({sourceCols});";
+                                cmd.ExecuteNonQuery();
                             }
-
-                            tx.Commit();
+                        }
+                        finally
+                        {
+                            using (var cmd = conn.CreateCommand())
+                            {
+                                cmd.CommandText = "DROP TABLE #temp;";
+                                cmd.ExecuteNonQuery();
+                            }
                         }
                     }
                 });
@@ -452,6 +488,8 @@ namespace GetRetechData
                 }
                 ProgressBarExport.Visibility = Visibility.Collapsed;
                 BtnImport.IsEnabled = true;
+                _isImporting = false;
+                EnabledAll();
             }
         }
     }
