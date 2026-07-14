@@ -26,6 +26,7 @@ namespace GetRetechData
         private string _connString;
         private readonly string _importConnString;
         private bool _isImporting;
+        private string importServer = "";
 
         public MainWindow()
         {
@@ -395,6 +396,7 @@ namespace GetRetechData
                     using (var conn = new SqlConnection(_importConnString))
                     {
                         conn.Open();
+                        importServer = conn.DataSource;
 
                         using (var cmd = conn.CreateCommand())
                         {
@@ -490,6 +492,7 @@ namespace GetRetechData
                 BtnImport.IsEnabled = true;
                 _isImporting = false;
                 EnabledAll();
+                MessageBox.Show("Proses impor ke server " + importServer + " selesai." , "Informasi", MessageBoxButton.OK, MessageBoxImage.Information);
             }
         }
     }
