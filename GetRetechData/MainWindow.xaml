@@ -66,13 +66,22 @@
                        FontSize="13"/>
         </StackPanel>
 
-        <ProgressBar x:Name="ProgressBarExport"
-                     Grid.Row="1"
-                     Margin="10,0,10,5"
-                     Height="20"
-                     Minimum="0"
-                     Maximum="100"
-                     Visibility="Collapsed"/>
+        <Grid x:Name="ProgressBarGrid"
+              Grid.Row="1"
+              Margin="10,0,10,5"
+              Height="20"
+              Visibility="Collapsed">
+            <ProgressBar x:Name="ProgressBarExport"
+                         Minimum="0"
+                         Maximum="100"/>
+            <TextBlock x:Name="TxtProgressPercent"
+                       Text=""
+                       HorizontalAlignment="Center"
+                       VerticalAlignment="Center"
+                       FontSize="12"
+                       FontWeight="Bold"
+                       IsHitTestVisible="False"/>
+        </Grid>
 
         <DataGrid x:Name="DataGridResult"
                   Grid.Row="2"

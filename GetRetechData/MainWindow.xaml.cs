@@ -43,7 +43,7 @@ namespace GetRetechData
 
             _autoLoadTimer = new DispatcherTimer
             {
-                Interval = TimeSpan.FromHours(1)
+                Interval = TimeSpan.FromMinutes(1)
             };
             _autoLoadTimer.Tick += AutoLoadTimer_Tick;
             _nextRunTime = DateTime.Now.Add(_autoLoadTimer.Interval);
@@ -232,6 +232,14 @@ namespace GetRetechData
             return dt.ToString("dd MMMM yyyy 'pukul' HH:mm:ss", System.Globalization.CultureInfo.GetCultureInfo("id-ID"));
         }
 
+        private void UpdateProgressPercent()
+        {
+            double max = ProgressBarExport.Maximum;
+            double value = ProgressBarExport.Value;
+            int pct = max > 0 ? (int)Math.Round(value / max * 100) : 0;
+            TxtProgressPercent.Text = $"{pct}%";
+        }
+
         private void UpdateNextRunLabel()
         {
             TxtNextRun.Text = _autoLoadTimer.IsEnabled
@@ -351,8 +359,9 @@ namespace GetRetechData
 
         private async Task ExportToZipAsync(string filePath)
         {
-            ProgressBarExport.Visibility = Visibility.Visible;
+            ProgressBarGrid.Visibility = Visibility.Visible;
             ProgressBarExport.IsIndeterminate = true;
+            TxtProgressPercent.Text = "";
             BtnExport.IsEnabled = false;
 
             try
@@ -379,8 +388,9 @@ namespace GetRetechData
                 ProgressBarExport.Maximum = totalRows;
                 ProgressBarExport.Value = 0;
                 ProgressBarExport.IsIndeterminate = false;
+                UpdateProgressPercent();
 
-                TxtStatus.Text = $"Mengekspor {totalRows} baris...";
+                TxtStatus.Text = $"[Sedang Berjalan] Mengekspor {totalRows} baris...";
 
                 await Task.Run(() =>
                 {
@@ -414,17 +424,26 @@ namespace GetRetechData
                                 if (rowCount % 500 == 0)
                                 {
                                     int current = rowCount;
-                                    Dispatcher.Invoke(() => ProgressBarExport.Value = current);
+                                    Dispatcher.Invoke(() =>
+                                    {
+                                        ProgressBarExport.Value = current;
+                                        UpdateProgressPercent();
+                                    });
                                 }
                             }
 
-                            Dispatcher.Invoke(() => ProgressBarExport.Value = rowCount);
+                            Dispatcher.Invoke(() =>
+                            {
+                                ProgressBarExport.Value = rowCount;
+                                UpdateProgressPercent();
+                            });
                         }
                     }
                 });
 
                 TxtStatus.Text = "Mengompres file...";
                 ProgressBarExport.IsIndeterminate = true;
+                TxtProgressPercent.Text = "";
 
                 string zipPath = System.IO.Path.ChangeExtension(filePath, ".zip");
                 string entryName = System.IO.Path.GetFileName(filePath);
@@ -467,7 +486,8 @@ namespace GetRetechData
             }
             finally
             {
-                ProgressBarExport.Visibility = Visibility.Collapsed;
+                ProgressBarGrid.Visibility = Visibility.Collapsed;
+                TxtProgressPercent.Text = "";
                 BtnExport.IsEnabled = true;
             }
         }
@@ -487,8 +507,9 @@ namespace GetRetechData
 
         private async Task ImportFromFileAsync(string sourcePath, bool showMessage)
         {
-            ProgressBarExport.Visibility = Visibility.Visible;
+            ProgressBarGrid.Visibility = Visibility.Visible;
             ProgressBarExport.IsIndeterminate = true;
+            TxtProgressPercent.Text = "";
             BtnImport.IsEnabled = false;
             DisabledAll();
 
@@ -547,6 +568,7 @@ namespace GetRetechData
                 ProgressBarExport.Maximum = dataLines;
                 ProgressBarExport.Value = 0;
                 ProgressBarExport.IsIndeterminate = false;
+                UpdateProgressPercent();
 
                 _isImporting = true;
                 TxtStatus.Text = $"Mengimpor {dataLines} baris, mohon tunggu sedang diproses...";
@@ -573,7 +595,11 @@ namespace GetRetechData
                             bulk.BatchSize = 1000;
                             bulk.NotifyAfter = 1000;
                             bulk.SqlRowsCopied += (s, args) =>
-                                Dispatcher.Invoke(() => ProgressBarExport.Value = (int)args.RowsCopied);
+                                Dispatcher.Invoke(() =>
+                                {
+                                    ProgressBarExport.Value = (int)args.RowsCopied;
+                                    UpdateProgressPercent();
+                                });
                             bulk.WriteToServer(dt);
                         }
 
@@ -610,6 +636,7 @@ namespace GetRetechData
                             Dispatcher.Invoke(() =>
                             {
                                 ProgressBarExport.IsIndeterminate = true;
+                                TxtProgressPercent.Text = "";
                                 TxtStatus.Text = "[Menunggu Proses Di Server] Menggabungkan data...";
                             });
 
@@ -654,7 +681,8 @@ namespace GetRetechData
                     }
                     catch { }
                 }
-                ProgressBarExport.Visibility = Visibility.Collapsed;
+                ProgressBarGrid.Visibility = Visibility.Collapsed;
+                TxtProgressPercent.Text = "";
                 BtnImport.IsEnabled = true;
                 _isImporting = false;
                 EnabledAll();
