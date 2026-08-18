@@ -15,6 +15,8 @@ using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using WF = System.Windows.Forms;
+using System.Drawing;
 
 namespace GetRetechData
 {
@@ -35,11 +37,36 @@ namespace GetRetechData
         private DateTime _lastRunTime;
         private bool _lastRunSuccess = true;
         private bool _isBusy;
+        private readonly WF.NotifyIcon _notifyIcon;
 
         public MainWindow()
         {
             InitializeComponent();
-            Closing += (s, e) => { if (_isImporting) e.Cancel = true; };
+
+            _notifyIcon = new WF.NotifyIcon
+            {
+                Icon = System.Drawing.Icon.ExtractAssociatedIcon(System.Windows.Application.ResourceAssembly.Location),
+                Visible = true,
+                Text = "GetRetechData"
+            };
+            _notifyIcon.DoubleClick += (s, e) => ShowWindow();
+
+            Closing += (s, e) =>
+            {
+                if (_isImporting)
+                {
+                    e.Cancel = true;
+                    return;
+                }
+                _notifyIcon.Visible = false;
+                _notifyIcon.Dispose();
+            };
+
+            StateChanged += (s, e) =>
+            {
+                if (WindowState == WindowState.Minimized)
+                    HideWindow();
+            };
 
             _autoLoadTimer = new DispatcherTimer
             {
@@ -67,6 +94,19 @@ namespace GetRetechData
 
             _connString = $"User Id={user};Password={pass};Data Source=(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST={host})(PORT={port}))(CONNECT_DATA=(SERVER=DEDICATED)(SERVICE_NAME={sid})));";
             _importConnString = "data source=10.110.32.58;initial catalog=RMS_DataInit;MultipleActiveResultSets=True;integrated security=false;user id=app.admin;password=@dm1n_app;Connection Timeout=0;Max Pool Size=2000;TrustServerCertificate=True";
+        }
+
+        private void HideWindow()
+        {
+            _notifyIcon.ShowBalloonTip(2000, "GetRetechData", "Aplikasi berjalan di system tray. Klik dua kali untuk membuka kembali.", WF.ToolTipIcon.Info);
+            Hide();
+        }
+
+        private void ShowWindow()
+        {
+            Show();
+            WindowState = WindowState.Normal;
+            Activate();
         }
 
         private void BtnConnect_Click(object sender, RoutedEventArgs e)
