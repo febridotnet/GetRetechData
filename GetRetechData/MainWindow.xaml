@@ -7,6 +7,7 @@
         mc:Ignorable="d"
         Title="GetRetechData" Height="450" Width="800"
         WindowStartupLocation="CenterScreen"
+        Loaded="Window_Loaded"
         Icon="app_icon.png">
     <Window.Resources>
         <Style TargetType="Button">
@@ -25,20 +26,24 @@
                 <Button x:Name="BtnConnect"
                         Content="Cek Koneksi Oracle"
                         Click="BtnConnect_Click"
+                        Visibility="Collapsed"
                         Width="150" Height="35" Margin="0,0,10,0" FontSize="13"/>
                 <Button x:Name="BtnLoadData"
                         Content="Load Data"
                         IsEnabled="False"
+                        Visibility="Collapsed"
                         Click="BtnLoadData_Click"
                         Width="100" Height="35" Margin="0,0,10,0" FontSize="13"/>
                 <Button x:Name="BtnExport"
                         Content="Export to ZIP"
                         IsEnabled="False"
+                        Visibility="Collapsed"
                         Click="BtnExport_Click"
                         Width="100" Height="35" Margin="0,0,10,0" FontSize="13"/>
                 <Button x:Name="BtnImport"
                         Content="Import to DB"
                         IsEnabled="True"
+                        Visibility="Collapsed"
                         Click="BtnImport_Click"
                         Width="100" Height="35" Margin="0,0,10,0" FontSize="13"/>
             </StackPanel>
@@ -47,6 +52,18 @@
                        Margin="0,5,0,0"
                        FontSize="13" FontWeight="Bold"
                        TextWrapping="Wrap"/>
+            <TextBlock x:Name="TxtNextRun"
+                       Text="Impor data berikutnya: -"
+                       Margin="0,3,0,0"
+                       FontSize="13"/>
+            <TextBlock x:Name="TxtNextConnCheck"
+                       Text="Pengecekan koneksi berikutnya: -"
+                       Margin="0,3,0,0"
+                       FontSize="13"/>
+            <TextBlock x:Name="TxtLastRun"
+                       Text="Impor data sebelumnya: -"
+                       Margin="0,3,0,0"
+                       FontSize="13"/>
         </StackPanel>
 
         <ProgressBar x:Name="ProgressBarExport"

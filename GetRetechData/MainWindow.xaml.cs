@@ -14,6 +14,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 
 namespace GetRetechData
 {
@@ -27,11 +28,36 @@ namespace GetRetechData
         private readonly string _importConnString;
         private bool _isImporting;
         private string importServer = "";
+        private readonly DispatcherTimer _autoLoadTimer;
+        private DateTime _nextRunTime;
+        private readonly DispatcherTimer _connCheckTimer;
+        private DateTime _nextConnCheckTime;
+        private DateTime _lastRunTime;
+        private bool _lastRunSuccess = true;
+        private bool _isBusy;
 
         public MainWindow()
         {
             InitializeComponent();
             Closing += (s, e) => { if (_isImporting) e.Cancel = true; };
+
+            _autoLoadTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromHours(1)
+            };
+            _autoLoadTimer.Tick += AutoLoadTimer_Tick;
+            _nextRunTime = DateTime.Now.Add(_autoLoadTimer.Interval);
+            _autoLoadTimer.Start();
+            UpdateNextRunLabel();
+
+            _connCheckTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMinutes(1)
+            };
+            _connCheckTimer.Tick += ConnCheckTimer_Tick;
+            _nextConnCheckTime = DateTime.Now.Add(_connCheckTimer.Interval);
+            _connCheckTimer.Start();
+            UpdateConnCheckLabel();
 
             string host = "10.32.159.101";
             string port = "1523";
@@ -45,6 +71,31 @@ namespace GetRetechData
 
         private void BtnConnect_Click(object sender, RoutedEventArgs e)
         {
+            CheckConnection();
+        }
+
+        private void Window_Loaded(object sender, RoutedEventArgs e)
+        {
+            CheckConnection();
+        }
+
+        private void ConnCheckTimer_Tick(object? sender, EventArgs e)
+        {
+            if (_isBusy || _isImporting) return;
+            _nextConnCheckTime = DateTime.Now.Add(_connCheckTimer.Interval);
+            UpdateConnCheckLabel();
+            CheckConnection();
+        }
+
+        private void UpdateConnCheckLabel()
+        {
+            TxtNextConnCheck.Text = _connCheckTimer.IsEnabled
+                ? $"Pengecekan koneksi berikutnya: {FormatDateTime(_nextConnCheckTime)}"
+                : "Pengecekan koneksi berikutnya: -";
+        }
+
+        private void CheckConnection()
+        {
             Mouse.OverrideCursor = Cursors.Wait;
             using (OracleConnection conn = new OracleConnection(_connString))
             {
@@ -54,10 +105,22 @@ namespace GetRetechData
                     conn.Open();
                     TxtStatus.Text = "Status: Sukses Terhubung ke Oracle!";
                     BtnLoadData.IsEnabled = true;
+
+                    if (!_autoLoadTimer.IsEnabled)
+                    {
+                        _nextRunTime = DateTime.Now.Add(_autoLoadTimer.Interval);
+                        _autoLoadTimer.Start();
+                        UpdateNextRunLabel();
+                    }
                 }
                 catch (Exception ex)
                 {
                     TxtStatus.Text = $"Status Gagal: {ex.Message}";
+                    if (_autoLoadTimer.IsEnabled)
+                    {
+                        _autoLoadTimer.Stop();
+                        UpdateNextRunLabel();
+                    }
                 }
                 finally
                 {
@@ -76,7 +139,7 @@ namespace GetRetechData
         private string CountQuery => @"select count(*) from item_loc_soh
             where coalesce(stock_on_hand,0)<>0 or coalesce(in_transit_qty,0)<>0";
 
-        private void LoadPage()
+        private bool LoadPage()
         {
             Mouse.OverrideCursor = Cursors.Wait;
             int offset = (_currentPage - 1) * _pageSize;
@@ -106,10 +169,12 @@ namespace GetRetechData
                     BtnPrev.IsEnabled = _currentPage > 1;
                     BtnNext.IsEnabled = _currentPage < _totalPages;
                     TxtStatus.Text = $"Total: {_totalRows} baris -- Page {_currentPage} of {_totalPages} ({offset + 1}-{Math.Min(_currentPage * _pageSize, _totalRows)})";
+                    return true;
                 }
                 catch (Exception ex)
                 {
                     TxtStatus.Text = $"Gagal: {ex.Message}";
+                    return false;
                 }
                 finally
                 {
@@ -141,6 +206,87 @@ namespace GetRetechData
 
         private void BtnLoadData_Click(object sender, RoutedEventArgs e)
         {
+            LoadData();
+        }
+
+        private async void AutoLoadTimer_Tick(object? sender, EventArgs e)
+        {
+            if (_isImporting || _isBusy) return;
+            _isBusy = true;
+            _autoLoadTimer.Stop();
+            try
+            {
+                await RunPipelineAsync();
+            }
+            finally
+            {
+                _isBusy = false;
+                _nextRunTime = DateTime.Now.Add(_autoLoadTimer.Interval);
+                _autoLoadTimer.Start();
+                UpdateNextRunLabel();
+            }
+        }
+
+        private static string FormatDateTime(DateTime dt)
+        {
+            return dt.ToString("dd MMMM yyyy 'pukul' HH:mm:ss", System.Globalization.CultureInfo.GetCultureInfo("id-ID"));
+        }
+
+        private void UpdateNextRunLabel()
+        {
+            TxtNextRun.Text = _autoLoadTimer.IsEnabled
+                ? $"Impor data berikutnya: {FormatDateTime(_nextRunTime)}"
+                : "Impor data berikutnya: -";
+        }
+
+        private async Task RunPipelineAsync()
+        {
+            _lastRunTime = DateTime.Now;
+            try
+            {
+                bool loadOk = LoadData();
+
+                if (!loadOk)
+                {
+                    _lastRunSuccess = false;
+                    UpdateLastRunLabel();
+                    TxtStatus.Text = $"Load Page Gagal pada {FormatDateTime(_lastRunTime)}";
+                    return;
+                }
+
+                if (_totalRows == 0)
+                {
+                    TxtStatus.Text = "Tidak ada data untuk diekspor/diimpor.";
+                    return;
+                }
+
+                string exportDir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "GetRetechData");
+                Directory.CreateDirectory(exportDir);
+                string zipPath = System.IO.Path.Combine(exportDir, $"item_loc_soh_{DateTime.Now:yyyyMMdd_HHmmss}.zip");
+
+                await ExportToZipAsync(zipPath);
+                await ImportFromFileAsync(zipPath, showMessage: false);
+
+                _lastRunSuccess = true;
+                UpdateLastRunLabel();
+            }
+            catch (Exception ex)
+            {
+                _lastRunSuccess = false;
+                UpdateLastRunLabel();
+                TxtStatus.Text = $"Gagal pipeline: {ex.Message}";
+            }
+        }
+
+        private void UpdateLastRunLabel()
+        {
+            TxtLastRun.Text = _lastRunSuccess
+                ? $"Impor data sebelumnya: Sukses {FormatDateTime(_lastRunTime)}"
+                : $"Impor data sebelumnya: GAGAL {FormatDateTime(_lastRunTime)}";
+        }
+
+        private bool LoadData()
+        {
             Mouse.OverrideCursor = Cursors.Wait;
             using (OracleConnection conn = new OracleConnection(_connString))
             {
@@ -155,12 +301,14 @@ namespace GetRetechData
                     _totalPages = (int)Math.Ceiling((double)_totalRows / _pageSize);
                     if (_totalPages == 0) _totalPages = 1;
 
-                    LoadPage();
+                    bool ok = LoadPage();
                     BtnExport.IsEnabled = _totalRows > 0;
+                    return ok;
                 }
                 catch (Exception ex)
                 {
                     TxtStatus.Text = $"Gagal: {ex.Message}";
+                    return false;
                 }
                 finally
                 {
@@ -198,7 +346,11 @@ namespace GetRetechData
             if (dialog.ShowDialog() != true)
                 return;
 
-            string filePath = dialog.FileName;
+            await ExportToZipAsync(dialog.FileName);
+        }
+
+        private async Task ExportToZipAsync(string filePath)
+        {
             ProgressBarExport.Visibility = Visibility.Visible;
             ProgressBarExport.IsIndeterminate = true;
             BtnExport.IsEnabled = false;
@@ -330,7 +482,11 @@ namespace GetRetechData
             if (dialog.ShowDialog() != true)
                 return;
 
-            string sourcePath = dialog.FileName;
+            await ImportFromFileAsync(dialog.FileName, showMessage: true);
+        }
+
+        private async Task ImportFromFileAsync(string sourcePath, bool showMessage)
+        {
             ProgressBarExport.Visibility = Visibility.Visible;
             ProgressBarExport.IsIndeterminate = true;
             BtnImport.IsEnabled = false;
@@ -451,6 +607,12 @@ namespace GetRetechData
 
                         try
                         {
+                            Dispatcher.Invoke(() =>
+                            {
+                                ProgressBarExport.IsIndeterminate = true;
+                                TxtStatus.Text = "[Menunggu Proses Di Server] Menggabungkan data...";
+                            });
+
                             using (var cmd = conn.CreateCommand())
                             {
                                 cmd.CommandTimeout = 0;
@@ -496,7 +658,8 @@ namespace GetRetechData
                 BtnImport.IsEnabled = true;
                 _isImporting = false;
                 EnabledAll();
-                MessageBox.Show("Proses impor ke server " + importServer + " selesai." , "Informasi", MessageBoxButton.OK, MessageBoxImage.Information);
+                if (showMessage)
+                    MessageBox.Show("Proses impor ke server " + importServer + " selesai.", "Informasi", MessageBoxButton.OK, MessageBoxImage.Information);
             }
         }
     }
