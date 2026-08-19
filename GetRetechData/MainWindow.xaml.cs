@@ -27,7 +27,7 @@ namespace GetRetechData
         private int _totalPages = 0;
         private int _totalRows = 0;
         private string _connString;
-        private readonly string _importConnString;
+        private string _importConnString;
         private bool _isImporting;
         private string importServer = "";
         private readonly DispatcherTimer _autoLoadTimer;
@@ -38,10 +38,22 @@ namespace GetRetechData
         private bool _lastRunSuccess = true;
         private bool _isBusy;
         private readonly WF.NotifyIcon _notifyIcon;
+        private readonly DispatcherTimer _clockTimer;
 
         public MainWindow()
         {
             InitializeComponent();
+
+            _clockTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(1)
+            };
+            _clockTimer.Tick += (s, e) => UpdateTitleClock();
+            _clockTimer.Start();
+            UpdateTitleClock();
+
+            TxtLogPath.Text = $"Log: {LogWriter.LogDirectory}";
+            TxtConfigPath.Text = $"Config: {ConfigManager.ConfigPath}";
 
             _notifyIcon = new WF.NotifyIcon
             {
@@ -68,9 +80,14 @@ namespace GetRetechData
                     HideWindow();
             };
 
+            var config = ConfigManager.Load();
+
+            int autoSecs = config.AutoLoadIntervalSeconds > 0 ? config.AutoLoadIntervalSeconds : 3600;
+            int connSecs = config.ConnCheckIntervalSeconds > 0 ? config.ConnCheckIntervalSeconds : 60;
+
             _autoLoadTimer = new DispatcherTimer
             {
-                Interval = TimeSpan.FromMinutes(1)
+                Interval = TimeSpan.FromSeconds(autoSecs)
             };
             _autoLoadTimer.Tick += AutoLoadTimer_Tick;
             _nextRunTime = DateTime.Now.Add(_autoLoadTimer.Interval);
@@ -79,21 +96,46 @@ namespace GetRetechData
 
             _connCheckTimer = new DispatcherTimer
             {
-                Interval = TimeSpan.FromMinutes(1)
+                Interval = TimeSpan.FromSeconds(connSecs)
             };
             _connCheckTimer.Tick += ConnCheckTimer_Tick;
             _nextConnCheckTime = DateTime.Now.Add(_connCheckTimer.Interval);
             _connCheckTimer.Start();
             UpdateConnCheckLabel();
 
-            string host = "10.32.159.101";
-            string port = "1523";
-            string sid = "hbidbrms";
-            string user = "rmsprd";
-            string pass = "rmsidbit";
+            string host = config.OracleHost ?? "";
+            string port = config.OraclePort ?? "";
+            string sid = config.OracleSid ?? "";
+            string user = config.OracleUser ?? "";
+            string pass = config.OraclePass ?? "";
 
             _connString = $"User Id={user};Password={pass};Data Source=(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST={host})(PORT={port}))(CONNECT_DATA=(SERVER=DEDICATED)(SERVICE_NAME={sid})));";
-            _importConnString = "data source=10.110.32.58;initial catalog=RMS_DataInit;MultipleActiveResultSets=True;integrated security=false;user id=app.admin;password=@dm1n_app;Connection Timeout=0;Max Pool Size=2000;TrustServerCertificate=True";
+            _importConnString = config.ImportConnString ?? "";
+
+            ConfigManager.Watch(cfg => Dispatcher.Invoke(() => ApplyConfig(cfg)));
+        }
+
+        private void ApplyConfig(AppConfig config)
+        {
+            int autoSecs = config.AutoLoadIntervalSeconds > 0 ? config.AutoLoadIntervalSeconds : 3600;
+            int connSecs = config.ConnCheckIntervalSeconds > 0 ? config.ConnCheckIntervalSeconds : 60;
+
+            _autoLoadTimer.Interval = TimeSpan.FromSeconds(autoSecs);
+            _connCheckTimer.Interval = TimeSpan.FromSeconds(connSecs);
+            _nextRunTime = DateTime.Now.Add(_autoLoadTimer.Interval);
+            _nextConnCheckTime = DateTime.Now.Add(_connCheckTimer.Interval);
+            UpdateNextRunLabel();
+            UpdateConnCheckLabel();
+
+            string host = config.OracleHost ?? "";
+            string port = config.OraclePort ?? "";
+            string sid = config.OracleSid ?? "";
+            string user = config.OracleUser ?? "";
+            string pass = config.OraclePass ?? "";
+            _connString = $"User Id={user};Password={pass};Data Source=(DESCRIPTION=(ADDRESS=(PROTOCOL=TCP)(HOST={host})(PORT={port}))(CONNECT_DATA=(SERVER=DEDICATED)(SERVICE_NAME={sid})));";
+            _importConnString = config.ImportConnString ?? _importConnString;
+
+            LogWriter.Write($"Konfigurasi diperbarui: {ConfigManager.ConfigPath}");
         }
 
         private void HideWindow()
@@ -107,6 +149,35 @@ namespace GetRetechData
             Show();
             WindowState = WindowState.Normal;
             Activate();
+        }
+
+        private void BtnOpenLog_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                if (!Directory.Exists(LogWriter.LogDirectory))
+                    Directory.CreateDirectory(LogWriter.LogDirectory);
+                System.Diagnostics.Process.Start("explorer.exe", LogWriter.LogDirectory);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Gagal membuka folder log: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void BtnOpenConfig_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                ConfigManager.Load();
+                if (!File.Exists(ConfigManager.ConfigPath))
+                    ConfigManager.Save();
+                System.Diagnostics.Process.Start("notepad.exe", ConfigManager.ConfigPath);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Gagal membuka config: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private void BtnConnect_Click(object sender, RoutedEventArgs e)
@@ -267,6 +338,11 @@ namespace GetRetechData
             }
         }
 
+        private void UpdateTitleClock()
+        {
+            Title = $"GetRetechData - {DateTime.Now:dd MMMM yyyy HH:mm:ss}";
+        }
+
         private static string FormatDateTime(DateTime dt)
         {
             return dt.ToString("dd MMMM yyyy 'pukul' HH:mm:ss", System.Globalization.CultureInfo.GetCultureInfo("id-ID"));
@@ -399,15 +475,17 @@ namespace GetRetechData
 
         private async Task ExportToZipAsync(string filePath)
         {
-            ProgressBarGrid.Visibility = Visibility.Visible;
-            ProgressBarExport.IsIndeterminate = true;
-            TxtProgressPercent.Text = "";
-            BtnExport.IsEnabled = false;
+ProgressBarGrid.Visibility = Visibility.Visible;
+                ProgressBarExport.IsIndeterminate = true;
+                TxtProgressPercent.Text = "";
+                BtnExport.IsEnabled = false;
 
-            try
-            {
-                DisabledAll();
-                TxtStatus.Text = "Menghitung total baris...";
+                LogWriter.Write($"Export dimulai | Status: Berjalan | Target: {filePath}");
+
+                try
+                {
+                    DisabledAll();
+                    TxtStatus.Text = "Menghitung total baris...";
 
                 int totalRows;
                 using (var conn = new OracleConnection(_connString))
@@ -421,6 +499,7 @@ namespace GetRetechData
 
                 if (totalRows == 0)
                 {
+                    LogWriter.Write("Export selesai | Status: Sukses | Rows berhasil diekspor: 0 | Rows gagal diekspor: 0 | Tidak ada data");
                     TxtStatus.Text = "Tidak ada data untuk diekspor.";
                     return;
                 }
@@ -450,17 +529,26 @@ namespace GetRetechData
                             writer.WriteLine();
 
                             int rowCount = 0;
+                            var failedRows = new List<string>();
                             while (reader.Read())
                             {
-                                for (int i = 0; i < reader.FieldCount; i++)
+                                var sb = new StringBuilder();
+                                try
                                 {
-                                    if (i > 0) writer.Write('|');
-                                    if (!reader.IsDBNull(i))
-                                        writer.Write(reader[i].ToString());
+                                    for (int i = 0; i < reader.FieldCount; i++)
+                                    {
+                                        if (i > 0) sb.Append('|');
+                                        if (!reader.IsDBNull(i))
+                                            sb.Append(reader[i].ToString());
+                                    }
+                                    writer.WriteLine(sb.ToString());
+                                    rowCount++;
                                 }
-                                writer.WriteLine();
+                                catch (Exception)
+                                {
+                                    failedRows.Add(sb.ToString());
+                                }
 
-                                rowCount++;
                                 if (rowCount % 500 == 0)
                                 {
                                     int current = rowCount;
@@ -477,6 +565,13 @@ namespace GetRetechData
                                 ProgressBarExport.Value = rowCount;
                                 UpdateProgressPercent();
                             });
+
+                            if (failedRows.Count > 0)
+                            {
+                                foreach (var failed in failedRows)
+                                    LogWriter.Write($"  EXPORT FAILED | {failed}");
+                            }
+                            LogWriter.Write($"Export selesai | Status: Sukses | Rows berhasil diekspor: {rowCount} | Rows gagal diekspor: {failedRows.Count} | File: {filePath}");
                         }
                     }
                 });
@@ -522,6 +617,7 @@ namespace GetRetechData
             }
             catch (Exception ex)
             {
+                LogWriter.Write($"Export GAGAL | Status: Gagal | Error: {ex.InnerException?.Message ?? ex.Message}");
                 TxtStatus.Text = $"Gagal ekspor: {ex.Message}";
             }
             finally
@@ -596,22 +692,41 @@ namespace GetRetechData
                 foreach (var header in headers)
                     dt.Columns.Add(header, typeof(string));
 
+                var failedRows = new List<string>();
                 for (int row = 1; row < lines.Length; row++)
                 {
                     string[] cols = lines[row].Split('|');
+                    var sb = new StringBuilder();
+                    bool valid = true;
+                    for (int i = 0; i < headers.Length; i++)
+                    {
+                        if (i > 0) sb.Append('|');
+                        string value = (i < cols.Length) ? cols[i] : "";
+                        sb.Append(value);
+                        if (value.Length > 4000)
+                            valid = false;
+                    }
+                    if (!valid)
+                    {
+                        failedRows.Add(sb.ToString());
+                        continue;
+                    }
                     var dr = dt.NewRow();
                     for (int i = 0; i < headers.Length; i++)
                         dr[i] = (i < cols.Length && !string.IsNullOrEmpty(cols[i])) ? cols[i] : DBNull.Value;
                     dt.Rows.Add(dr);
                 }
 
-                ProgressBarExport.Maximum = dataLines;
+                int validRows = dt.Rows.Count;
+                LogWriter.Write($"Import dimulai | Status: Berjalan | File: {sourcePath} | Total baris dibaca: {dataLines}");
+
+                ProgressBarExport.Maximum = validRows;
                 ProgressBarExport.Value = 0;
                 ProgressBarExport.IsIndeterminate = false;
                 UpdateProgressPercent();
 
                 _isImporting = true;
-                TxtStatus.Text = $"Mengimpor {dataLines} baris, mohon tunggu sedang diproses...";
+                TxtStatus.Text = $"Mengimpor {validRows} baris, mohon tunggu sedang diproses...";
 
                 await Task.Run(() =>
                 {
@@ -703,10 +818,18 @@ namespace GetRetechData
                     }
                 });
 
-                TxtStatus.Text = $"Impor selesai: {dataLines} baris diimpor.";
+                TxtStatus.Text = $"Impor selesai: {validRows} baris diimpor.";
+
+                if (failedRows.Count > 0)
+                {
+                    foreach (var failed in failedRows)
+                        LogWriter.Write($"  IMPORT FAILED | {failed}");
+                }
+                LogWriter.Write($"Import selesai | Status: Sukses | Rows berhasil diimpor: {validRows} | Rows gagal diimpor: {failedRows.Count} | Server: {importServer}");
             }
             catch (Exception ex)
             {
+                LogWriter.Write($"Import GAGAL | Status: Gagal | Error: {ex.InnerException?.Message ?? ex.Message}");
                 TxtStatus.Text = $"Gagal impor: {ex.Message}";
             }
             finally

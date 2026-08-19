@@ -64,6 +64,30 @@
                        Text="Impor data sebelumnya: -"
                        Margin="0,3,0,0"
                        FontSize="13"/>
+<StackPanel Orientation="Horizontal">
+                <TextBlock x:Name="TxtLogPath"
+                           Text="Log: -"
+                           Margin="0,3,0,0"
+                           FontSize="13"
+                           VerticalAlignment="Center"/>
+                <Button x:Name="BtnOpenLog"
+                        Content="..."
+                        Click="BtnOpenLog_Click"
+                        Width="35" Height="20" Margin="5,3,0,0"
+                        FontSize="11" Padding="2,0"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal">
+                <TextBlock x:Name="TxtConfigPath"
+                           Text="Config: -"
+                           Margin="0,3,0,0"
+                           FontSize="13"
+                           VerticalAlignment="Center"/>
+                <Button x:Name="BtnOpenConfig"
+                        Content="..."
+                        Click="BtnOpenConfig_Click"
+                        Width="35" Height="20" Margin="5,3,0,0"
+                        FontSize="11" Padding="2,0"/>
+            </StackPanel>
         </StackPanel>
 
         <Grid x:Name="ProgressBarGrid"
